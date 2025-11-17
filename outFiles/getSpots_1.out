@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/sean/Desktop/Repos/LAB-positioner-tilt/notebooks/getSpotsFromImgs.py", line 55, in <module>
+    sourcedSpots = np.append(sourcedSpots,sources["xcentroid","ycentroid","sharpness","roundness1","roundness2","npix","peak"])
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sean/.local/share/mamba/envs/lsst-scipipe/lib/python3.12/site-packages/numpy/lib/_function_base_impl.py", line 5728, in append
+    return concatenate((arr, values), axis=axis)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+numpy.exceptions.DTypePromotionError: The DType <class 'numpy.dtypes.Float64DType'> could not be promoted by <class 'numpy.dtypes.VoidDType'>. This means that no common DType exists for the given inputs. For example they cannot be stored in a single array unless the dtype is `object`. The full list of DTypes is: (<class 'numpy.dtypes.Float64DType'>, <class 'numpy.dtypes.VoidDType'>)

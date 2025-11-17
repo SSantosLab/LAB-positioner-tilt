@@ -1,0 +1,1 @@
+WARNING: NoDetectionsWarning: Sources were found, but none pass the sharpness, roundness, or peakmax criteria [photutils.detection.daofinder]

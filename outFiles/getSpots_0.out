@@ -1,0 +1,5 @@
+Traceback (most recent call last):
+  File "/Users/sean/Desktop/Repos/LAB-positioner-tilt/notebooks/getSpotsFromImgs.py", line 32, in <module>
+    mask = np.ones(np.shape(np.array(img)))
+                                     ^^^
+NameError: name 'img' is not defined

@@ -1,0 +1,7 @@
+Traceback (most recent call last):
+  File "/Users/sean/Desktop/Repos/LAB-positioner-tilt/notebooks/getSpotsFromImgs.py", line 55, in <module>
+    sourcedSpots = np.append(sourcedSpots,np.array(sources["xcentroid","ycentroid","sharpness","roundness1","roundness2","npix","peak"],dtype=np.float32))
+                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sean/.local/share/mamba/envs/lsst-scipipe/lib/python3.12/site-packages/astropy/table/table.py", line 1180, in __array__
+    raise ValueError("Datatype coercion is not allowed")
+ValueError: Datatype coercion is not allowed
