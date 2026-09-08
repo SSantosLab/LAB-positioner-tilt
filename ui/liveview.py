@@ -24,57 +24,16 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, Normalize
 from matplotlib.gridspec import GridSpec
-from matplotlib.patches import Ellipse
-from scipy.optimize import curve_fit
+from matplotlib.patches import Ellipse, Rectangle
 
 from TiltTest.lab.Thorlabs.CS126MU import CS126MU
-
-
-# ---------------------------------------------------------------------------
-# 2-D Gaussian model  (no rotation, separate σ_x / σ_y, flat background)
-# ---------------------------------------------------------------------------
-
-def _gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y, background):
-    x, y = xy
-    exponent = (x - x0) ** 2 / (2 * sigma_x ** 2) + (y - y0) ** 2 / (2 * sigma_y ** 2)
-    return (background + amplitude * np.exp(-exponent)).ravel()
+from TiltTest.analysis.spotfinding import build_spot_finder
 
 
 def _block_average(image, factor):
     h, w = image.shape
     h2, w2 = h // factor, w // factor
     return image[:h2 * factor, :w2 * factor].reshape(h2, factor, w2, factor).mean(axis=(1, 3))
-
-
-def fit_spot(image, bin_factor):
-    """Fit a 2-D Gaussian; spatially bins by *bin_factor* for speed, returns coords in original pixel units."""
-    img = _block_average(image, bin_factor)
-
-    # Background subtracted image is only used for initial parameter guess!
-    bg_guess = float(np.percentile(img, 5))
-    img_sub = np.clip(img - bg_guess, 0, None)
-    total = img_sub.sum()
-    if total == 0:
-        raise RuntimeError("Image is blank after background subtraction")
-
-    y_idx, x_idx = np.indices(img.shape)
-
-    # Moment-based initial guesses
-    x0_g = float((x_idx * img_sub).sum() / total)
-    y0_g = float((y_idx * img_sub).sum() / total)
-    amp_g = float(img_sub.max())
-    sx_g = max(float(np.sqrt(((x_idx - x0_g) ** 2 * img_sub).sum() / total)), 1.0)
-    sy_g = max(float(np.sqrt(((y_idx - y0_g) ** 2 * img_sub).sum() / total)), 1.0)
-
-    p0 = [amp_g, x0_g, y0_g, sx_g, sy_g, bg_guess]
-    xy = (x_idx.ravel(), y_idx.ravel())
-    popt, _ = curve_fit(_gaussian_2d, xy, img.ravel(), p0=p0, maxfev=1000)
-
-    amplitude, x0, y0, sigma_x, sigma_y, background = popt
-    peak = amplitude + background  # absolute peak counts, physically bounded by bit depth
-    # Scale back to original pixel units
-    scale = float(bin_factor)
-    return x0 * scale, y0 * scale, abs(sigma_x) * scale, abs(sigma_y) * scale, peak, amplitude, background
 
 
 # ---------------------------------------------------------------------------
@@ -84,9 +43,11 @@ def fit_spot(image, bin_factor):
 class LiveViewUI:
     _IMG_DISPLAY_FACTOR = 8
 
-    def __init__(self, exposure_us, stack, plate_scale_mm, output_path=None):
+    def __init__(self, exposure_us, stack, plate_scale_mm, output_path=None, clip=(0, 0, 0, 0)):
         self.plate_scale_mm = plate_scale_mm
         self._output_path = output_path
+        self._clip = clip
+        self._clip_rect_set = False
         self._lock  = threading.Lock()
         self._dirty = threading.Event()
         self._segment = 0
@@ -141,6 +102,8 @@ class LiveViewUI:
         (self._img_pt,) = ax_img.plot([], [], "+", color="red", markersize=10, markeredgewidth=1.5)
         self._img_el = Ellipse((0, 0), width=1, height=1, fill=False, edgecolor="red", linewidth=1.2)
         ax_img.add_patch(self._img_el)
+        self._clip_rect = Rectangle((0, 0), 0, 0, fill=False, edgecolor="green", linewidth=1.2, visible=False)
+        ax_img.add_patch(self._clip_rect)
 
         ax_x.set_xlabel("Time (s)")
         ax_x.set_ylabel("X (mm)", color="steelblue")
@@ -189,6 +152,7 @@ class LiveViewUI:
         self._sigma_xs = []
         self._sigma_ys = []
         self._amps     = []
+        self._thetas_deg = []
         self._span_artists = []
 
         self.fig.canvas.mpl_connect("key_press_event", self._on_key)
@@ -217,11 +181,11 @@ class LiveViewUI:
     # Called from acquisition thread
     # ------------------------------------------------------------------
 
-    def add_measurement(self, t, x0, y0, sx, sy, amp, fit_amp, fit_bg,
+    def add_measurement(self, t, x0, y0, sx, sy, theta, amp, fit_amp, fit_bg,
                         image, saturated, sat_level):
         with self._lock:
             self._pending = dict(
-                t=t, x0=x0, y0=y0, sx=sx, sy=sy, amp=amp,
+                t=t, x0=x0, y0=y0, sx=sx, sy=sy, theta=theta, amp=amp,
                 fit_amp=fit_amp, fit_bg=fit_bg,
                 image=image, saturated=saturated, sat_level=sat_level,
             )
@@ -244,7 +208,7 @@ class LiveViewUI:
         if p is None or self._paused:
             return
 
-        t, x0, y0, sx, sy   = p["t"], p["x0"], p["y0"], p["sx"], p["sy"]
+        t, x0, y0, sx, sy, theta = p["t"], p["x0"], p["y0"], p["sx"], p["sy"], p["theta"]
         amp, fit_amp, fit_bg = p["amp"], p["fit_amp"], p["fit_bg"]
         image, saturated, sat_level = p["image"], p["saturated"], p["sat_level"]
 
@@ -266,6 +230,7 @@ class LiveViewUI:
         self._sigma_xs.append(sx * psm)
         self._sigma_ys.append(sy * psm)
         self._amps.append(amp)
+        self._thetas_deg.append(np.degrees(theta))
 
         # XY scatter: colored by segment
         if len(self._xs) > 1:
@@ -322,12 +287,23 @@ class LiveViewUI:
             self._img_artist.set_data(img_disp)
             self._apply_img_norm(img_disp)
 
+        if not self._clip_rect_set:
+            left, bottom, right, top = self._clip
+            if any(self._clip):
+                self._clip_rect.set_bounds(
+                    left * psm, top * psm,
+                    (w_px - left - right) * psm, (h_px - top - bottom) * psm,
+                )
+                self._clip_rect.set_visible(True)
+            self._clip_rect_set = True
+
         # Update the fitted spot position and sigma elipse
         cx_mm, cy_mm = x0 * psm, y0 * psm
         self._img_pt.set_data([cx_mm], [cy_mm])
         self._img_el.set_center((cx_mm, cy_mm))
         self._img_el.set_width(2 * sx * psm)
         self._img_el.set_height(2 * sy * psm)
+        self._img_el.set_angle(np.degrees(theta))
 
         self.fig.canvas.draw()
 
@@ -346,6 +322,7 @@ class LiveViewUI:
             self._times.clear(); self._segments.clear()
             self._xs.clear(); self._ys.clear()
             self._sigma_xs.clear(); self._sigma_ys.clear(); self._amps.clear()
+            self._thetas_deg.clear()
             self._segment = 0
             self._pending = None
             self._hist_sc.set_offsets(np.empty((0, 2)))
@@ -369,6 +346,7 @@ class LiveViewUI:
                 self._times.append(nan); self._segments.append(nan)
                 self._xs.append(nan); self._ys.append(nan)
                 self._sigma_xs.append(nan); self._sigma_ys.append(nan); self._amps.append(nan)
+                self._thetas_deg.append(nan)
             self._paused = not self._paused
             self._update_title()
             self.fig.canvas.draw()
@@ -416,9 +394,9 @@ class LiveViewUI:
             stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             path = Path(f"tilt_{stamp}.csv")
         data = np.column_stack([self._times, self._segments, self._xs, self._ys,
-                                self._sigma_xs, self._sigma_ys, self._amps])
+                                self._sigma_xs, self._sigma_ys, self._thetas_deg, self._amps])
         np.savetxt(path, data, delimiter=",",
-                   header="time_s,segment,x_mm,y_mm,sigma_x_mm,sigma_y_mm,amplitude_counts",
+                   header="time_s,segment,x_mm,y_mm,sigma_x_mm,sigma_y_mm,theta_deg,amplitude_counts",
                    comments="")
         print(f"[liveview] saved {len(self._times)} rows → {path.resolve()}")
 
@@ -435,11 +413,11 @@ class LiveViewUI:
 # ---------------------------------------------------------------------------
 
 class AcquisitionThread(threading.Thread):
-    def __init__(self, ui, cam, bin_factor, sat_level, sat_fraction, stack, interval):
+    def __init__(self, ui, cam, spot_finder, sat_level, sat_fraction, stack, interval):
         super().__init__(daemon=True)
         self._ui           = ui
         self._cam          = cam
-        self._bin_factor   = bin_factor
+        self._spot_finder  = spot_finder
         self._sat_level    = sat_level
         self._sat_fraction = sat_fraction
         self._stack        = stack
@@ -462,13 +440,14 @@ class AcquisitionThread(threading.Thread):
                     float((image >= self._sat_level).sum()) / image.size
                     >= self._sat_fraction
                 )
-                x0, y0, sx, sy, amp, fit_amp, fit_bg = fit_spot(image, self._bin_factor)
+                spot = self._spot_finder.find(image)
             except (RuntimeError, ValueError, TimeoutError) as exc:
                 print(f"[liveview] frame error: {exc}", file=sys.stderr)
             else:
                 t = self.elapsed()
                 self._ui.add_measurement(
-                    t, x0, y0, sx, sy, amp, fit_amp, fit_bg,
+                    t, spot.x0, spot.y0, spot.sigma_x, spot.sigma_y, spot.theta,
+                    spot.peak, spot.amplitude, spot.background,
                     image, saturated, self._sat_level,
                 )
 
@@ -504,7 +483,22 @@ def main():
     )
     parser.add_argument(
         "--bin", type=int, default=4, dest="bin_factor",
-        help="Spatial binning factor used for Gaussian fit (default: 4)",
+        help="Spatial binning factor used for spot finding (default: 4)",
+    )
+    parser.add_argument(
+        "--method", choices=["gaussian", "threshold"], default="gaussian",
+        help="Spot finding method: 2-D Gaussian fit, or threshold + ellipse fit (default: gaussian)",
+    )
+    parser.add_argument(
+        "--threshold", type=float, default=None,
+        help="Absolute count level for --method threshold, applied to the binned image "
+             "(required when --method threshold is used)",
+    )
+    parser.add_argument(
+        "--clip", type=int, nargs=4, default=(0, 0, 0, 0),
+        metavar=("LEFT", "BOTTOM", "RIGHT", "TOP"),
+        help="Raw pixels to exclude from spot finding at each frame edge, e.g. where the "
+             "target screen's edge clips the spot (default: 0 0 0 0, i.e. no clipping)",
     )
     parser.add_argument(
         "--plate-scale", type=float, default=85.9, dest="plate_scale_um",
@@ -527,9 +521,16 @@ def main():
         help="Output path stem for 'w' save; .csv and .pdf are appended automatically (default: tilt_YYYYMMDD_HHMMSS)",
     )
     args = parser.parse_args()
+    if args.method == "threshold" and args.threshold is None:
+        parser.error("--threshold is required when --method threshold is used")
     plate_scale_mm = args.plate_scale_um * 1e-3
 
-    ui = LiveViewUI(args.exposure, args.stack, plate_scale_mm, output_path=args.output)
+    spot_finder = build_spot_finder(
+        args.method, bin_factor=args.bin_factor, threshold=args.threshold,
+        clip=tuple(args.clip),
+    )
+
+    ui = LiveViewUI(args.exposure, args.stack, plate_scale_mm, output_path=args.output, clip=tuple(args.clip))
 
     cam = CS126MU(camera_index=args.camera)
     cam.setExposure(args.exposure)
@@ -540,7 +541,7 @@ def main():
         acq = AcquisitionThread(
             ui=ui,
             cam=cam,
-            bin_factor=args.bin_factor,
+            spot_finder=spot_finder,
             sat_level=sat_level,
             sat_fraction=args.sat_fraction,
             stack=args.stack,
