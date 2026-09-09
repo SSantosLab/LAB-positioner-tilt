@@ -1,0 +1,27 @@
+meta:
+  name: SDSSVBenchtopTest
+  description: "Initial tilt tests with the SDSS-V on the optical table - dis-entanglement not ideal"
+  operator: Johannes Wüthrich
+  dut: SDSS-V (from EPFL)
+
+data:
+  base: './_data/'
+  saveimages: True
+
+camera:
+  serial: '28979'
+  exposure: 100000 # 100ms - from previous tests
+  stack: 10
+
+positioner:
+  can:
+    tty: '/dev/positioner_canbus'
+
+tilt:
+  spot:
+    threshold: 75 # From previous tests
+    clip: [1120, 180, 580, 110]
+
+  positioner:
+    alpha: [120]
+    beta: [120, 240]
