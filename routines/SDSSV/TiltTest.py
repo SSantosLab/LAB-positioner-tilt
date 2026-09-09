@@ -122,21 +122,42 @@ def RunTiltTest(config):
                     'pos:beta': beta,
                     'camera:stack': N_STACK,
                     'camera:exposure': EXPOSURE,
-                    'spot:threshold': TRESHOLD,
+                    'spot:threshold': THRESHOLD,
                     **{
                         f'spot:{key}': value
                             for key, value in dataclasses.asdict(measurement).items()
                     }
                 })
 
-
-        run_dir.saveResultDf(pd.DataFrame(output_data))
+        data_df = pd.DataFrame(output_data)
+        run_dir.saveResultDf(data_df, 'TiltData')
 
     finally:
         camera.close()
 
 
-    # TODO: Do some online analysis
+    ## Plot the fitted spot center
+    #
+    import matplotlib.pyplot as plt
+
+    grouped_df = data_df.groupby('pos:alpha')
+
+    fig, ax = plt.subplots()
+
+    for alpha, group_df in grouped_df:
+        ax.scatter(
+            group_df['spot:x0'], group_df['spot:y0'], marker='x',
+            label=f'$\\alpha$: {alpha:.3f}'
+        )
+
+    ax.grid()
+    ax.legend()
+
+    ax.set_xlabel('X [pix]')
+    ax.set_ylabel('Y [pix]')
+
+    fig.tight_layout()
+    run_dir.saveFig(fig, 'SpotCenters.pdf')
 
 
 
