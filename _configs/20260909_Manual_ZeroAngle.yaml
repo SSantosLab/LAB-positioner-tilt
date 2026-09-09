@@ -1,0 +1,24 @@
+meta:
+  name: ManualZeroAngle
+  description: "Manual zero-angle test - calibration cylinder rotated by hand about one axis"
+  operator: Johannes Wüthrich
+  dut: Calibration cylinder
+
+data:
+  base: './_data/'
+  saveimages: True
+  debug: False
+
+#
+camera:
+  serial: '28979'
+  exposure: 10000 # 10ms - from previous tests
+  stack: 10
+
+tilt:
+  spot:
+    threshold: 2000 # From previous tests
+    clip: [1120, 180, 580, 110]
+
+# Note: Previous test showed that threshold spot-finding with laser works
+# if the laser spot is highly over-saturated, thus also the use of 10ms exposure
