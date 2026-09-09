@@ -134,22 +134,6 @@ def RunZeroAngle(config):
     #
     import matplotlib.pyplot as plt
 
-    # The cylinder point traces a circle; imaged slightly off-normal it
-    # projects to an ellipse. Reuse the spotfinder's conic fit (temporary --
-    # to be pulled into a proper analysis module later).
-    # Note: _fit_ellipse throws on perfectly noise-free input; fine for real data.
-    x0, y0, a_major, a_minor, theta = TiltTest.analysis.spotfinding._fit_ellipse(
-        data_df['spot:x0'].to_numpy(dtype=float),
-        data_df['spot:y0'].to_numpy(dtype=float),
-    )
-    radius = float(np.sqrt(a_major * a_minor))  # effective circle radius [pix]
-    logger.info(
-        LOG_CAT,
-        f'Ellipse fit: center=({x0:.2f}, {y0:.2f}), '
-        f'a={a_major:.2f} pix, b={a_minor:.2f} pix, '
-        f'radius={radius:.2f} pix, theta={np.degrees(theta):.2f} deg'
-    )
-
     fig, ax = plt.subplots()
 
     ax.scatter(
@@ -157,29 +141,48 @@ def RunZeroAngle(config):
         label='Spot centers'
     )
 
-    t = np.linspace(0, 2 * np.pi, 256)
-    ct, st = np.cos(theta), np.sin(theta)
-    ex, ey = a_major * np.cos(t), a_minor * np.sin(t)
-    ax.plot(
-        x0 + ex * ct - ey * st, y0 + ex * st + ey * ct,
-        '-', color='tab:red', label='Fitted ellipse',
-    )
+    try:
+        # The cylinder point traces a circle; imaged slightly off-normal it
+        # projects to an ellipse. Reuse the spotfinder's conic fit (temporary --
+        # to be pulled into a proper analysis module later).
+        # Note: _fit_ellipse throws on perfectly noise-free input; fine for real data.
+        x0, y0, a_major, a_minor, theta = TiltTest.analysis.spotfinding._fit_ellipse(
+            data_df['spot:x0'].to_numpy(dtype=float),
+            data_df['spot:y0'].to_numpy(dtype=float),
+        )
+        radius = float(np.sqrt(a_major * a_minor))  # effective circle radius [pix]
+        logger.info(
+            LOG_CAT,
+            f'Ellipse fit: center=({x0:.2f}, {y0:.2f}), '
+            f'a={a_major:.2f} pix, b={a_minor:.2f} pix, '
+            f'radius={radius:.2f} pix, theta={np.degrees(theta):.2f} deg'
+        )
 
-    ax.scatter(
-        [x0], [y0], marker='+', s=120, color='tab:red',
-        label=f'Center ({x0:.1f}, {y0:.1f})'
-    )
+        t = np.linspace(0, 2 * np.pi, 256)
+        ct, st = np.cos(theta), np.sin(theta)
+        ex, ey = a_major * np.cos(t), a_minor * np.sin(t)
+        ax.plot(
+            x0 + ex * ct - ey * st, y0 + ex * st + ey * ct,
+            '-', color='tab:red', label='Fitted ellipse',
+        )
 
-    # Draw the semi-major axis and label both semi-axes
-    ax.plot(
-        [x0, x0 + a_major * ct], [y0, y0 + a_major * st],
-        '--', color='tab:red',
-    )
-    ax.annotate(
-        f'a = {a_major:.1f} pix\nb = {a_minor:.1f} pix',
-        xy=(x0 + 0.5 * a_major * ct, y0 + 0.5 * a_major * st),
-        xytext=(8, 8), textcoords='offset points',
-    )
+        ax.scatter(
+            [x0], [y0], marker='+', s=120, color='tab:red',
+            label=f'Center ({x0:.1f}, {y0:.1f})'
+        )
+
+        # Draw the semi-major axis and label both semi-axes
+        ax.plot(
+            [x0, x0 + a_major * ct], [y0, y0 + a_major * st],
+            '--', color='tab:red',
+        )
+        ax.annotate(
+            f'a = {a_major:.1f} pix\nb = {a_minor:.1f} pix',
+            xy=(x0 + 0.5 * a_major * ct, y0 + 0.5 * a_major * st),
+            xytext=(8, 8), textcoords='offset points',
+        )
+    except RuntimeError as e:
+        print(e)
 
     ax.set_aspect('equal')
     ax.grid()
