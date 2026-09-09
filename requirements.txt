@@ -2,3 +2,4 @@ matplotlib
 numpy
 scipy
 tifffile
+posUtils @ git+ssh://git@github.com/SSantosLab/LAB-Pos-Utils.git@u/johannes/TiltTest
