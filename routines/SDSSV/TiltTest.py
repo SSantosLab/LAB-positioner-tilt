@@ -7,8 +7,9 @@ import TiltTest.analysis.spotfinding
 
 import numpy as np
 import pandas as pd
+
+import pathlib
 import datetime
-import pyaml
 import dataclasses
 
 LOG_CAT = 'SDSS-V-TiltTest'
@@ -30,18 +31,19 @@ def RunTiltTest(config):
 
     BASE_DATA_override = config.getDefault('data:base', None)
     if BASE_DATA_override is not None:
-        posUtils.data.dir.DataDir.BASE_DATA = BASE_DATA_override
-        logger.warning(f'BASE_DATA overridden to: {BASE_DATA_override}')
+        posUtils.data.dir.DataDir.BASE_DATA = pathlib.Path(BASE_DATA_override)
 
-    data_dir = posUtils.data.dir.DataDir.getDir(
-        posUtils.data.dir.PosModule.SDSS_V,
-        posUtils.data.dir.PosTest.TILT,
-    )
+    data_dir = posUtils.data.dir.DataDir.getDir("sdss", "tilt")
 
 
     test_name = config.getDefault('meta:name', 'SDSSVBenchtopTest')
     run_dir = data_dir.createRunDir(test_name)
-    logger = run_dir.createLogger()
+    logger = run_dir.createLogger(
+        debug=config.getDefault('data:debug', False)
+    )
+
+    if BASE_DATA_override is not None:
+        logger.warning(LOG_CAT, f'BASE_DATA overridden to: {BASE_DATA_override}')
 
     # Save the config file
     run_dir.saveConfig(config.dict())
@@ -77,7 +79,7 @@ def RunTiltTest(config):
 
         # Init the spot finding algorithm
         spotfinder = TiltTest.analysis.spotfinding.ThresholdSpotFinder(
-            threshold= THRESHOLD * N_STACK, clip=CLIP
+            threshold= THRESHOLD, clip=CLIP
         )
 
         output_data = []
@@ -88,21 +90,23 @@ def RunTiltTest(config):
             logger.info(LOG_CAT, f'Beta circle at alpha={alpha:.3f}')
 
             for beta in BETA_VALUES:
-                logger.debug(LOG_CAT, f'Beta={beta:.3f}')
+                logger.info(LOG_CAT, f'Beta={beta:.3f}')
                 sdssv.pos1.goto_absolute(alpha, beta)
                 sdssv.pos1.wait_move()
 
 
+                logger.debug(LOG_CAT, f'Take [{N_STACK}] images')
                 images = camera.takeImages(N_STACK)
-                image_sum = np.sum(list(images.values()), axis=0)
+                image_sum = np.mean(list(images.values()), axis=0)
 
                 # Apply spot finding
                 measurement = spotfinder.find(image_sum)
-                logger.debug(LOG_CAT, f'Spotfinding: {measurement}')
+                logger.debug(LOG_CAT, f'Spotfinding result: {measurement}')
 
 
                 if SAVE_IMAGES:
-                    image_file = f'Spot_Stack{NSTACK}_{alpha:.3f}_{beta:.3f}.npz'
+                    image_file = f'Spot_Stack{N_STACK}_{alpha:.3f}_{beta:.3f}.npz'
+                    logger.debug(LOG_CAT, f'Save raw image to [{image_file}]')
                     np.savez_compressed(
                         run_dir.data / image_file,
                         image_sum
