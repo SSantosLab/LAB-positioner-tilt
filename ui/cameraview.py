@@ -7,7 +7,7 @@ Usage (from the repo root):
 Keyboard shortcuts:
   p  pause / resume acquisition
   i  toggle image between linear and log scale
-  w  save current frame as PNG
+  w  save current frame (PNG preview + raw .npz)
 """
 
 import argparse
@@ -140,16 +140,20 @@ class CameraViewUI:
                 self.fig.canvas.draw()
 
         elif event.key == "w":
-            self._save_png()
+            self._save_frame()
 
-    def _save_png(self):
+    def _save_frame(self):
         if self._last_image is None:
             print("[cameraview] no frame to save", file=sys.stderr)
             return
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = Path(f"frame_{stamp}.png")
-        plt.imsave(path, self._last_image, cmap="inferno")
-        print(f"[cameraview] saved frame → {path.resolve()}")
+        png_path = Path(f"frame_{stamp}.png")
+        npz_path = Path(f"frame_{stamp}.npz")
+        # plt.imsave's own normalization+colormap loses the raw counts -- save
+        # those separately too, as arr_0 (matching TiltTest.GetImage's npz convention).
+        plt.imsave(png_path, self._last_image, cmap="inferno")
+        np.savez_compressed(npz_path, self._last_image)
+        print(f"[cameraview] saved frame → {png_path.resolve()} (preview), {npz_path.resolve()} (raw)")
 
 
 # ---------------------------------------------------------------------------
